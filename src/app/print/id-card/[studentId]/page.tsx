@@ -118,6 +118,7 @@ export default async function PrintIdCardPage({
             side="front"
             student={cardStudent}
             cardNumber={student.admission_no ?? `CARD-${student.id}`}
+            sessionName={currentSession?.name ?? "2026-27"}
           />
         </div>
 
@@ -130,6 +131,7 @@ export default async function PrintIdCardPage({
             side="back"
             student={cardStudent}
             cardNumber={student.admission_no ?? `CARD-${student.id}`}
+            sessionName={currentSession?.name ?? "2026-27"}
           />
         </div>
       </div>

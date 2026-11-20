@@ -36,6 +36,7 @@ interface CardRendererProps {
   student?: CardStudentData | null;
   teacher?: CardTeacherData | null;
   cardNumber?: string | null;
+  sessionName?: string | null;
 }
 
 export function CardRenderer({
@@ -44,7 +45,9 @@ export function CardRenderer({
   student,
   teacher,
   cardNumber = "CARD-TEST-0001",
+  sessionName = "2026-27",
 }: CardRendererProps) {
+  const activeSessionLabel = sessionName || "2026-27";
   const settings = (template.settings ?? {}) as Record<string, unknown>;
   const tagline = String(settings.tagline ?? "Learning with purpose");
   const backText = String(
@@ -54,7 +57,7 @@ export function CardRenderer({
   const showSessionValidity = settings.show_session_validity !== false;
 
   const studentName = student?.full_name || "Muhammed Ali Khan";
-  const admissionNo = student?.admission_no || "SM-2025-084";
+  const admissionNo = student?.admission_no || "SM-2026-001";
   const familyNumber = student?.family?.family_number ?? "1042";
   const guardianName = student?.family?.guardian_name || "Tariq Mehmood Khan";
   const guardianMobile = student?.family?.guardian_mobile || "0300-1234567";
@@ -80,7 +83,7 @@ export function CardRenderer({
                 Card Terms & Safety
               </span>
               <span className="rounded bg-amber-400/10 px-1 py-0.5 text-[6px] font-bold text-amber-300 uppercase">
-                Valid 2025-26
+                Valid {activeSessionLabel}
               </span>
             </div>
             <ul className="mt-2 space-y-1 text-[6.5px] leading-tight text-slate-300">

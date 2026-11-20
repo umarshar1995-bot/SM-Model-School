@@ -90,7 +90,7 @@ export function MarksheetDocument({
               Official Document
             </span>
             <p className="text-xs font-bold text-slate-700">
-              Academic Year: {session?.name ?? "2025-2026"}
+              Academic Year: {session?.name ?? "2026-27"}
             </p>
             <p className="text-xs font-medium text-slate-500">
               Issue Date: {formatDate(new Date())}
@@ -121,7 +121,7 @@ export function MarksheetDocument({
               Admission No
             </span>
             <span className="font-mono font-bold text-blue-800 text-sm">
-              {student?.admission_no ?? "SM-2025-084"}
+              {student?.admission_no ?? "SM-2026-001"}
             </span>
           </div>
           <div>

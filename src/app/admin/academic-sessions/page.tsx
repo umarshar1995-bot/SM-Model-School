@@ -225,7 +225,7 @@ export default function AcademicSessionsPage() {
               maxLength={20}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="e.g. 2026-2027"
+              placeholder="e.g. 2026-27"
               className="w-full rounded-xl border border-slate-200 px-3 py-2 dark:border-slate-700 dark:bg-slate-800"
             />
           </div>
