@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -16,8 +16,6 @@ import {
   Home,
   IdCard,
   Layers,
-  LayoutGrid,
-  List,
   Loader2,
   Pencil,
   Plus,
@@ -34,6 +32,7 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Modal } from "@/components/ui/Modal";
 import { Badge, statusVariant } from "@/components/ui/Badge";
+import { ExcelImportModal } from "@/components/students/ExcelImportModal";
 import {
   formatDate,
   formatDateInput,
@@ -114,11 +113,16 @@ export default function StudentsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [genderFilter, setGenderFilter] = useState("");
   const [trashed, setTrashed] = useState(false);
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [showEmptyClasses, setShowEmptyClasses] = useState(true);
   const [loading, setLoading] = useState(true);
 
-  // Per-card download popover
+  // Per-row download dropdown
   const [openDownloadId, setOpenDownloadId] = useState<number | null>(null);
+
+  // Excel Import Modal State
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importTargetClassId, setImportTargetClassId] = useState("");
+  const [importTargetSectionId, setImportTargetSectionId] = useState("");
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<StudentRow | null>(null);
@@ -140,7 +144,6 @@ export default function StudentsPage() {
     address: "",
   });
 
-  const importInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const fullNameInputRef = useRef<HTMLInputElement>(null);
 
@@ -204,11 +207,11 @@ export default function StudentsPage() {
   }, [loadData]);
 
   useEffect(() => {
-    if (searchParams.get("new") === "1" && families.length > 0 && !modalOpen && !editing) {
+    if (searchParams.get("new") === "1" && !loading && !modalOpen && !editing) {
       openCreate();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams, families.length]);
+  }, [searchParams, loading]);
 
   const activeClassObj = classes.find((c) => String(c.id) === classFilter) ?? null;
   const classSectionsForFilter = sections.filter(
@@ -222,19 +225,31 @@ export default function StudentsPage() {
     router.replace(url);
   }
 
-  function openCreate() {
+  function openImportModal(forClassId?: string, forSectionId?: string) {
+    const cid = forClassId ?? classFilter;
+    const sid =
+      forSectionId ??
+      (cid === classFilter ? sectionFilter : "") ??
+      "";
+    setImportTargetClassId(cid);
+    setImportTargetSectionId(sid);
+    setImportModalOpen(true);
+  }
+
+  function openCreate(forClassId?: string) {
+    const chosenClassId = forClassId ?? classFilter;
     const targetClass =
-      (classFilter ? classes.find((c) => String(c.id) === classFilter) : null) ??
+      (chosenClassId ? classes.find((c) => String(c.id) === chosenClassId) : null) ??
       classes[0];
     const targetSec =
-      (sectionFilter
+      (chosenClassId === classFilter && sectionFilter
         ? sections.find((s) => String(s.id) === sectionFilter)
         : null) ??
       sections.find((s) => targetClass && s.class_id === targetClass.id);
 
     setEditing(null);
     setAddedInSession([]);
-    setQuickFamilyOpen(false);
+    setQuickFamilyOpen(families.length === 0);
     setEnrollNow(Boolean(currentSession && targetClass && targetSec));
     setForm({
       full_name: "",
@@ -473,26 +488,29 @@ export default function StudentsPage() {
     }
   }
 
-  async function handleExcelImport(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch("/api/admin/students/import", {
-      method: "POST",
-      body: fd,
-    });
-    const out = await res.json();
-    e.target.value = "";
-    if (!res.ok) {
-      toast.error(out.error || "Import failed.");
-      return;
+  // Group students into their respective classes for per-class tables
+  const groupedByClass = useMemo(() => {
+    const map = new Map<number, StudentRow[]>();
+    const unenrolled: StudentRow[] = [];
+
+    for (const st of students) {
+      const cid = st.student_enrollments[0]?.school_classes?.id;
+      if (cid != null) {
+        const list = map.get(cid) ?? [];
+        list.push(st);
+        map.set(cid, list);
+      } else {
+        unenrolled.push(st);
+      }
     }
-    toast.success(
-      `Imported ${out.imported} student(s)${out.skipped ? ` (${out.skipped} skipped)` : ""}.`,
-    );
-    loadData();
-  }
+
+    const classGroups = classes.map((cls) => ({
+      cls,
+      rows: map.get(cls.id) ?? [],
+    }));
+
+    return { classGroups, unenrolled };
+  }, [classes, students]);
 
   const filteredModalSections = sections.filter(
     (sec) => String(sec.class_id) === form.class_id,
@@ -502,358 +520,162 @@ export default function StudentsPage() {
     ? `/api/admin/students/export?classId=${classFilter}`
     : "/api/admin/students/export";
 
-  return (
-    <div className="space-y-6">
-      {/* ACTIVE CLASS CONTEXT BANNER (when opened from Classes KPI Card) */}
-      {activeClassObj ? (
-        <section className="relative overflow-hidden rounded-3xl border border-blue-200/70 bg-gradient-to-br from-blue-950 via-indigo-950 to-slate-950 p-6 text-white shadow-xl sm:p-7">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div className="space-y-2">
-              <Link
-                href="/admin/classes"
-                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm font-semibold text-blue-100 transition hover:bg-white/20"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back to All Classes</span>
-              </Link>
-              <div className="flex flex-wrap items-center gap-3 pt-1">
-                <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
-                  {activeClassObj.name}
-                </h1>
-                <span className="rounded-full bg-amber-400/20 px-3.5 py-1 text-sm font-bold text-amber-300 ring-1 ring-amber-400/30">
-                  {students.length} Student{students.length === 1 ? "" : "s"}
-                </span>
-              </div>
-              <p className="text-sm text-blue-200/85">
-                Showing enrolled students in {activeClassObj.name}. Filter by section, edit,
-                download records, or admit new students directly into this class.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
-              <a
-                href={exportUrl}
-                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-bold text-white backdrop-blur-sm transition hover:bg-white/20"
-              >
-                <Download className="h-4 w-4" />
-                <span>Download Class Excel</span>
-              </a>
+  function renderStudentsTable(rows: StudentRow[], emptyClass?: ClassOption) {
+    if (rows.length === 0) {
+      return (
+        <div className="px-6 py-8 text-center">
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+            No students enrolled in{" "}
+            <strong className="text-slate-800 dark:text-slate-200">
+              {emptyClass ? emptyClass.name : "this selection"}
+            </strong>{" "}
+            yet.
+          </p>
+          {emptyClass && !trashed && (
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
               <button
                 type="button"
-                onClick={openCreate}
-                className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-5 py-2.5 text-sm font-extrabold text-slate-950 shadow-md transition hover:bg-amber-300 cursor-pointer"
+                onClick={() => openImportModal(String(emptyClass.id))}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3.5 py-2 text-xs font-extrabold text-emerald-700 transition hover:bg-emerald-600 hover:text-white dark:bg-emerald-950/60 dark:text-emerald-300 cursor-pointer"
               >
-                <UserPlus className="h-4 w-4" />
-                <span>Add to {activeClassObj.name}</span>
+                <Upload className="h-3.5 w-3.5" />
+                <span>Import Excel to {emptyClass.name}</span>
               </button>
-            </div>
-          </div>
-
-          {/* SECTION FILTER PILLS */}
-          {classSectionsForFilter.length > 0 && (
-            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-4">
               <button
                 type="button"
-                onClick={() => setSectionFilter("")}
-                className={`rounded-xl px-4 py-2 text-sm font-bold transition cursor-pointer ${
-                  sectionFilter === ""
-                    ? "bg-white text-blue-950 shadow-sm"
-                    : "bg-white/10 text-blue-100 hover:bg-white/20"
-                }`}
+                onClick={() => openCreate(String(emptyClass.id))}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3.5 py-2 text-xs font-extrabold text-blue-700 transition hover:bg-blue-600 hover:text-white dark:bg-blue-950/60 dark:text-blue-300 cursor-pointer"
               >
-                All Sections
-              </button>
-              {classSectionsForFilter.map((sec) => (
-                <button
-                  key={sec.id}
-                  type="button"
-                  onClick={() => setSectionFilter(String(sec.id))}
-                  className={`rounded-xl px-4 py-2 text-sm font-bold transition cursor-pointer ${
-                    sectionFilter === String(sec.id)
-                      ? "bg-white text-blue-950 shadow-sm"
-                      : "bg-white/10 text-blue-100 hover:bg-white/20"
-                  }`}
-                >
-                  {sec.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-      ) : (
-        <PageHeader
-          eyebrow="Student Information System"
-          title="Students Directory"
-          description="Browse student cards, edit profiles, download ID cards or marksheets, and admit multiple students back-to-back."
-          icon={<GraduationCap className="h-5 w-5" />}
-          actions={
-            <>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={handleExcelImport}
-              />
-              <button
-                type="button"
-                onClick={() => importInputRef.current?.click()}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer"
-              >
-                <Upload className="h-4 w-4" />
-                <span>Import Excel</span>
-              </button>
-              <a
-                href={exportUrl}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-              >
-                <Download className="h-4 w-4" />
-                <span>Export .xlsx</span>
-              </a>
-              <button
-                type="button"
-                onClick={openCreate}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-800 cursor-pointer"
-              >
-                <UserPlus className="h-4 w-4" />
+                <UserPlus className="h-3.5 w-3.5" />
                 <span>Add Student</span>
               </button>
-            </>
-          }
-        />
-      )}
-
-      {/* FILTER & VIEW BAR */}
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-blue-100/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="relative flex-1 min-w-56">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by student name, father's name, admission #, B-Form..."
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 py-2.5 text-sm font-medium dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-          />
+            </div>
+          )}
         </div>
+      );
+    }
 
-        <select
-          value={classFilter}
-          onChange={(e) => selectClassFilter(e.target.value)}
-          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold dark:border-slate-700 dark:bg-slate-800"
-        >
-          <option value="">All Classes</option>
-          {classes.map((c) => (
-            <option key={c.id} value={String(c.id)}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:bg-slate-800/70 dark:text-slate-300">
+            <tr>
+              <th className="px-4 py-3.5">Roll #</th>
+              <th className="px-5 py-3.5">Student</th>
+              <th className="px-5 py-3.5">Father&apos;s Name &amp; Contact</th>
+              <th className="px-4 py-3.5">Adm. No</th>
+              <th className="px-4 py-3.5">Section</th>
+              <th className="px-4 py-3.5">Gender / DOB</th>
+              <th className="px-4 py-3.5">Status</th>
+              <th className="px-5 py-3.5 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {rows.map((st) => {
+              const pUrl = photoUrl(st.photo_path);
+              const enr = st.student_enrollments[0];
+              const dlOpen = openDownloadId === st.id;
 
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold dark:border-slate-700 dark:bg-slate-800"
-        >
-          <option value="">All Statuses</option>
-          <option value="active">Active</option>
-          <option value="left">Left</option>
-          <option value="struck_off">Struck Off</option>
-          <option value="passed_out">Passed Out</option>
-        </select>
+              return (
+                <tr
+                  key={st.id}
+                  className="transition hover:bg-blue-50/40 dark:hover:bg-slate-800/40"
+                >
+                  <td className="px-4 py-3.5 whitespace-nowrap font-mono text-sm font-black text-slate-700 dark:text-slate-200">
+                    {enr?.roll_no ? `#${enr.roll_no}` : "—"}
+                  </td>
 
-        <select
-          value={genderFilter}
-          onChange={(e) => setGenderFilter(e.target.value)}
-          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold dark:border-slate-700 dark:bg-slate-800"
-        >
-          <option value="">All Genders</option>
-          <option value="male">Male</option>
-          <option value="female">Female</option>
-        </select>
-
-        <button
-          type="button"
-          onClick={() => setTrashed((t) => !t)}
-          className={`rounded-xl px-3.5 py-2.5 text-sm font-bold transition cursor-pointer ${
-            trashed
-              ? "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
-              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-          }`}
-        >
-          {trashed ? "Viewing Trash" : "Trash"}
-        </button>
-
-        {/* CARDS / TABLE SWITCH */}
-        <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800">
-          <button
-            type="button"
-            onClick={() => setViewMode("cards")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
-              viewMode === "cards"
-                ? "bg-white text-blue-700 shadow-xs dark:bg-slate-700 dark:text-blue-300"
-                : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-            }`}
-            title="Cards View"
-          >
-            <LayoutGrid className="h-4 w-4" />
-            <span>Cards</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewMode("table")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
-              viewMode === "table"
-                ? "bg-white text-blue-700 shadow-xs dark:bg-slate-700 dark:text-blue-300"
-                : "text-slate-500 hover:text-slate-800 dark:text-slate-400"
-            }`}
-            title="Table View"
-          >
-            <List className="h-4 w-4" />
-            <span>Table</span>
-          </button>
-        </div>
-      </div>
-
-      {/* STUDENTS CONTENT: CARDS OR TABLE */}
-      {loading ? (
-        <div className="flex justify-center py-20 text-blue-600">
-          <Loader2 className="h-7 w-7 animate-spin" />
-        </div>
-      ) : students.length === 0 ? (
-        <div className="rounded-3xl border border-dashed border-slate-300 bg-white py-16 text-center dark:border-slate-700 dark:bg-slate-900">
-          <GraduationCap className="mx-auto h-12 w-12 text-slate-400" />
-          <h3 className="mt-3 text-lg font-bold text-slate-800 dark:text-slate-200">
-            No students found
-          </h3>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            {activeClassObj
-              ? `No students are enrolled in ${activeClassObj.name} matching this filter.`
-              : "Try adjusting your filters or click Add Student to admit a new student."}
-          </p>
-          <button
-            type="button"
-            onClick={openCreate}
-            className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-800 cursor-pointer"
-          >
-            <UserPlus className="h-4 w-4" />
-            <span>Add Student</span>
-          </button>
-        </div>
-      ) : viewMode === "cards" ? (
-        /* ═══ STUDENT CARDS GRID ═══ */
-        <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {students.map((st) => {
-            const pUrl = photoUrl(st.photo_path);
-            const enr = st.student_enrollments[0];
-            const dlOpen = openDownloadId === st.id;
-
-            return (
-              <article
-                key={st.id}
-                className="relative flex flex-col justify-between rounded-3xl border border-slate-200/90 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-blue-700"
-              >
-                {/* TOP: PICTURE THUMBNAIL + STUDENT NAME + FATHER'S NAME */}
-                <div>
-                  <div className="flex items-start gap-4">
-                    {pUrl ? (
-                      <img
-                        src={pUrl}
-                        alt={st.full_name}
-                        className="h-16 w-16 shrink-0 rounded-2xl object-cover ring-2 ring-blue-100 shadow-sm dark:ring-slate-700"
-                      />
-                    ) : (
-                      <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-xl font-black text-white shadow-sm">
-                        {getInitials(st.full_name)}
-                      </div>
-                    )}
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="truncate text-lg font-extrabold tracking-tight text-slate-950 dark:text-white">
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-3">
+                      {pUrl ? (
+                        <img
+                          src={pUrl}
+                          alt={st.full_name}
+                          className="h-11 w-11 shrink-0 rounded-xl object-cover ring-1 ring-slate-200 dark:ring-slate-700"
+                        />
+                      ) : (
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-black text-white">
+                          {getInitials(st.full_name)}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="font-extrabold text-slate-950 dark:text-white">
                           {st.full_name}
-                        </h3>
-                        <Badge variant={statusVariant(st.status)} dot className="shrink-0 text-xs">
-                          {st.status.replace("_", " ")}
-                        </Badge>
-                      </div>
-
-                      {/* FATHER'S NAME */}
-                      <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-slate-600 dark:text-slate-300">
-                        <User className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                        <span className="truncate">
-                          Father: {st.families?.guardian_name ?? "—"}
-                        </span>
-                      </p>
-
-                      {/* ADMISSION NO & FAMILY ID */}
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="rounded-lg bg-blue-50 px-2.5 py-1 font-mono text-blue-800 dark:bg-blue-950/60 dark:text-blue-300">
-                          {st.admission_no ?? "No Adm #"}
-                        </span>
-                        {st.families && (
-                          <span className="rounded-lg bg-indigo-50 px-2.5 py-1 font-mono text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-                            FAM-{st.families.family_number}
-                          </span>
+                        </p>
+                        {st.b_form_no && (
+                          <p className="font-mono text-xs text-slate-500">
+                            B-Form: {st.b_form_no}
+                          </p>
                         )}
                       </div>
                     </div>
-                  </div>
+                  </td>
 
-                  {/* CLASS / SECTION / ROLL / DOB STRIP */}
-                  <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm dark:bg-slate-800/60">
-                    <div>
-                      <span className="block text-xs font-semibold text-slate-400">
-                        Class &amp; Section
+                  <td className="px-5 py-3.5">
+                    <p className="font-bold text-slate-800 dark:text-slate-200">
+                      {st.families?.guardian_name ?? "—"}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        FAM-{st.families?.family_number ?? "—"}
                       </span>
-                      <span className="font-bold text-slate-900 dark:text-white">
-                        {enr
-                          ? `${enr.school_classes?.name ?? "—"} (${enr.class_sections?.name ?? "—"})`
-                          : "Unenrolled"}
-                      </span>
-                    </div>
-                    <div className="text-right">
-                      <span className="block text-xs font-semibold text-slate-400">
-                        Roll No / Gender
-                      </span>
-                      <span className="font-bold capitalize text-slate-900 dark:text-white">
-                        {enr?.roll_no ? `#${enr.roll_no}` : "—"} · {st.gender}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                      {st.families?.guardian_mobile
+                        ? ` · ${st.families.guardian_mobile}`
+                        : ""}
+                    </p>
+                  </td>
 
-                {/* ACTION BAR: EDIT, DOWNLOAD, DELETE (+ 360°) */}
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
-                  {!trashed ? (
-                    <>
-                      <div className="flex flex-wrap items-center gap-2">
+                  <td className="px-4 py-3.5 whitespace-nowrap font-mono font-bold text-blue-700 dark:text-blue-400">
+                    {st.admission_no ?? "—"}
+                  </td>
+
+                  <td className="px-4 py-3.5 whitespace-nowrap font-semibold text-slate-700 dark:text-slate-300">
+                    {enr?.class_sections?.name ?? "—"}
+                  </td>
+
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    <span className="block text-xs font-bold capitalize text-slate-800 dark:text-slate-200">
+                      {st.gender}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {formatDate(st.dob)}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-3.5 whitespace-nowrap">
+                    <Badge variant={statusVariant(st.status)} dot>
+                      {st.status.replace("_", " ")}
+                    </Badge>
+                  </td>
+
+                  <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                    {!trashed ? (
+                      <div className="inline-flex items-center justify-end gap-1.5">
                         <button
                           type="button"
                           onClick={() => openEdit(st)}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-blue-50 px-3.5 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-600 hover:text-white dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-600 dark:hover:text-white cursor-pointer"
+                          className="inline-flex items-center gap-1 rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 transition hover:bg-blue-600 hover:text-white dark:bg-blue-950/60 dark:text-blue-300 cursor-pointer"
                         >
                           <Pencil className="h-3.5 w-3.5" />
                           <span>Edit</span>
                         </button>
 
-                        {/* DOWNLOAD MENU BUTTON */}
+                        {/* DOWNLOAD MENU */}
                         <div
                           className="relative"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <button
                             type="button"
-                            onClick={() =>
-                              setOpenDownloadId(dlOpen ? null : st.id)
-                            }
-                            className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700 transition hover:bg-emerald-600 hover:text-white dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-600 dark:hover:text-white cursor-pointer"
+                            onClick={() => setOpenDownloadId(dlOpen ? null : st.id)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 transition hover:bg-emerald-600 hover:text-white dark:bg-emerald-950/60 dark:text-emerald-300 cursor-pointer"
                           >
                             <Download className="h-3.5 w-3.5" />
                             <span>Download</span>
                           </button>
 
                           {dlOpen && (
-                            <div className="absolute bottom-full left-0 z-30 mb-2 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                            <div className="absolute right-0 top-full z-30 mt-1.5 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 text-left shadow-xl dark:border-slate-700 dark:bg-slate-900">
                               <Link
                                 href={`/print/id-card/${st.id}?autoprint=1`}
                                 target="_blank"
@@ -896,157 +718,356 @@ export default function StudentsPage() {
                         <button
                           type="button"
                           onClick={() => handleDelete(st, "soft")}
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 px-3.5 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-600 hover:text-white dark:bg-rose-950/60 dark:text-rose-300 dark:hover:bg-rose-600 dark:hover:text-white cursor-pointer"
+                          className="inline-flex items-center gap-1 rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-600 hover:text-white dark:bg-rose-950/60 dark:text-rose-300 cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           <span>Delete</span>
                         </button>
-                      </div>
 
-                      <Link
-                        href={`/admin/classes-and-sections?studentId=${st.id}`}
-                        className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-900 hover:text-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700"
-                        title="Open 360° Profile"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>360°</span>
-                      </Link>
-                    </>
-                  ) : (
-                    <div className="flex w-full items-center justify-end gap-2">
+                        <Link
+                          href={`/admin/classes-and-sections?studentId=${st.id}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-900 hover:text-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700"
+                          title="Open 360° Profile"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>360°</span>
+                        </Link>
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(st, "restore")}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 cursor-pointer"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>Restore</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(st, "force")}
+                          className="inline-flex items-center gap-1 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700 cursor-pointer"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span>Delete Forever</span>
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* ACTIVE CLASS CONTEXT BANNER (when opened from Classes KPI Card or class selector) */}
+      {activeClassObj ? (
+        <section className="relative overflow-hidden rounded-3xl border border-blue-200/70 bg-gradient-to-br from-blue-950 via-indigo-950 to-slate-950 p-6 text-white shadow-xl sm:p-7">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-2">
+              <Link
+                href="/admin/classes"
+                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm font-semibold text-blue-100 transition hover:bg-white/20"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to All Classes</span>
+              </Link>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <h1 className="text-3xl font-black tracking-tight sm:text-4xl">
+                  {activeClassObj.name}
+                </h1>
+                <span className="rounded-full bg-amber-400/20 px-3.5 py-1 text-sm font-bold text-amber-300 ring-1 ring-amber-400/30">
+                  {students.length} Student{students.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <p className="text-sm text-blue-200/85">
+                Tabular roster for {activeClassObj.name}. Import students via validated Excel,
+                export class sheet, or admit students back-to-back.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => openImportModal(String(activeClassObj.id), sectionFilter)}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-extrabold text-white shadow-md transition hover:bg-emerald-400 cursor-pointer"
+              >
+                <Upload className="h-4 w-4" />
+                <span>Import Excel</span>
+              </button>
+              <a
+                href={exportUrl}
+                className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-sm font-bold text-white backdrop-blur-sm transition hover:bg-white/20"
+              >
+                <Download className="h-4 w-4" />
+                <span>Export Class Excel</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => openCreate(String(activeClassObj.id))}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-400 px-5 py-2.5 text-sm font-extrabold text-slate-950 shadow-md transition hover:bg-amber-300 cursor-pointer"
+              >
+                <UserPlus className="h-4 w-4" />
+                <span>Add to {activeClassObj.name}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* SECTION FILTER PILLS */}
+          {classSectionsForFilter.length > 0 && (
+            <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-white/10 pt-4">
+              <button
+                type="button"
+                onClick={() => setSectionFilter("")}
+                className={`rounded-xl px-4 py-2 text-sm font-bold transition cursor-pointer ${
+                  sectionFilter === ""
+                    ? "bg-white text-blue-950 shadow-sm"
+                    : "bg-white/10 text-blue-100 hover:bg-white/20"
+                }`}
+              >
+                All Sections
+              </button>
+              {classSectionsForFilter.map((sec) => (
+                <button
+                  key={sec.id}
+                  type="button"
+                  onClick={() => setSectionFilter(String(sec.id))}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold transition cursor-pointer ${
+                    sectionFilter === String(sec.id)
+                      ? "bg-white text-blue-950 shadow-sm"
+                      : "bg-white/10 text-blue-100 hover:bg-white/20"
+                  }`}
+                >
+                  {sec.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : (
+        <PageHeader
+          eyebrow="Student Information System"
+          title="Students by Class"
+          description="Every class displays its enrolled students in its own structured table with validated Excel import, template downloads, and continuous multi-entry admissions."
+          icon={<GraduationCap className="h-5 w-5" />}
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={() => openImportModal("")}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-sm hover:bg-emerald-700 cursor-pointer"
+              >
+                <Upload className="h-4 w-4" />
+                <span>Import Excel</span>
+              </button>
+              <a
+                href={exportUrl}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              >
+                <Download className="h-4 w-4" />
+                <span>Export .xlsx</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => openCreate()}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-blue-800 cursor-pointer"
+              >
+                <UserPlus className="h-4 w-4" />
+                <span>Add Student</span>
+              </button>
+            </>
+          }
+        />
+      )}
+
+      {/* FILTER BAR */}
+      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-blue-100/80 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="relative flex-1 min-w-56">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by student name, father's name, admission #, B-Form..."
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 py-2.5 text-sm font-medium dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+          />
+        </div>
+
+        <select
+          value={classFilter}
+          onChange={(e) => selectClassFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold dark:border-slate-700 dark:bg-slate-800"
+        >
+          <option value="">All Classes (Grouped Tables)</option>
+          {classes.map((c) => (
+            <option key={c.id} value={String(c.id)}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold dark:border-slate-700 dark:bg-slate-800"
+        >
+          <option value="">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="left">Left</option>
+          <option value="struck_off">Struck Off</option>
+          <option value="passed_out">Passed Out</option>
+        </select>
+
+        <select
+          value={genderFilter}
+          onChange={(e) => setGenderFilter(e.target.value)}
+          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-semibold dark:border-slate-700 dark:bg-slate-800"
+        >
+          <option value="">All Genders</option>
+          <option value="male">Male</option>
+          <option value="female">Female</option>
+        </select>
+
+        {!activeClassObj && !trashed && (
+          <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showEmptyClasses}
+              onChange={(e) => setShowEmptyClasses(e.target.checked)}
+              className="rounded border-slate-300 text-blue-700"
+            />
+            <span>Show empty classes</span>
+          </label>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setTrashed((t) => !t)}
+          className={`rounded-xl px-3.5 py-2.5 text-sm font-bold transition cursor-pointer ${
+            trashed
+              ? "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+          }`}
+        >
+          {trashed ? "Viewing Trash" : "Trash"}
+        </button>
+      </div>
+
+      {/* STUDENTS CONTENT: RESPECTIVE CLASS TABLES (NEVER GRID!) */}
+      {loading ? (
+        <div className="flex justify-center py-20 text-blue-600">
+          <Loader2 className="h-7 w-7 animate-spin" />
+        </div>
+      ) : activeClassObj ? (
+        /* SINGLE CLASS TABLE */
+        <section className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-6 py-4 dark:border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-blue-600" />
+              <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+                {activeClassObj.name} — Student Roster
+              </h2>
+              <Badge variant="blue">{students.length} student{students.length === 1 ? "" : "s"}</Badge>
+            </div>
+            <p className="text-xs font-medium text-slate-500">
+              {currentSession ? `Session ${currentSession.name}` : ""}
+            </p>
+          </div>
+          {renderStudentsTable(students, activeClassObj)}
+        </section>
+      ) : (
+        /* EVERY CLASS IN ITS OWN RESPECTIVE CLASS TABLE */
+        <div className="space-y-6">
+          {groupedByClass.classGroups
+            .filter((g) => showEmptyClasses || g.rows.length > 0)
+            .map(({ cls, rows }) => (
+              <section
+                key={cls.id}
+                className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-6 py-4 dark:border-slate-800 dark:bg-slate-800/40">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => selectClassFilter(String(cls.id))}
+                      className="text-lg font-black tracking-tight text-slate-950 hover:text-blue-700 dark:text-white dark:hover:text-blue-400 cursor-pointer"
+                    >
+                      {cls.name}
+                    </button>
+                    <Badge variant={rows.length > 0 ? "blue" : "slate"}>
+                      {rows.length} Student{rows.length === 1 ? "" : "s"}
+                    </Badge>
+                  </div>
+
+                  {!trashed && (
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleDelete(st, "restore")}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-emerald-700 cursor-pointer"
+                        onClick={() => openImportModal(String(cls.id))}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-extrabold text-emerald-700 transition hover:bg-emerald-600 hover:text-white dark:bg-emerald-950/60 dark:text-emerald-300 cursor-pointer"
                       >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Restore</span>
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>Import Excel</span>
                       </button>
+                      {rows.length > 0 && (
+                        <a
+                          href={`/api/admin/students/export?classId=${cls.id}`}
+                          className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          <span>Export</span>
+                        </a>
+                      )}
                       <button
                         type="button"
-                        onClick={() => handleDelete(st, "force")}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-rose-700 cursor-pointer"
+                        onClick={() => openCreate(String(cls.id))}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-800 cursor-pointer"
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>Delete Forever</span>
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add Student</span>
                       </button>
                     </div>
                   )}
                 </div>
-              </article>
-            );
-          })}
-        </section>
-      ) : (
-        /* ═══ TABLE VIEW ═══ */
-        <div className="overflow-hidden rounded-2xl border border-blue-100 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wider text-slate-500 dark:bg-slate-800/60">
-                <tr>
-                  <th className="px-5 py-3.5">Student</th>
-                  <th className="px-5 py-3.5">Father&apos;s Name</th>
-                  <th className="px-5 py-3.5">Adm. No</th>
-                  <th className="px-5 py-3.5">Class &amp; Section</th>
-                  <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {students.map((st) => {
-                  const pUrl = photoUrl(st.photo_path);
-                  const enr = st.student_enrollments[0];
-                  return (
-                    <tr
-                      key={st.id}
-                      className="hover:bg-blue-50/40 dark:hover:bg-slate-800/40"
-                    >
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          {pUrl ? (
-                            <img
-                              src={pUrl}
-                              alt={st.full_name}
-                              className="h-11 w-11 rounded-xl object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-100 text-sm font-black text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                              {getInitials(st.full_name)}
-                            </div>
-                          )}
-                          <div>
-                            <p className="font-bold text-slate-950 dark:text-white">
-                              {st.full_name}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              DOB: {formatDate(st.dob)}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <p className="font-semibold text-slate-800 dark:text-slate-200">
-                          {st.families?.guardian_name ?? "—"}
-                        </p>
-                        <p className="font-mono text-xs text-indigo-600 dark:text-indigo-400">
-                          FAM-{st.families?.family_number ?? "—"}
-                        </p>
-                      </td>
-                      <td className="px-5 py-3.5 font-mono font-bold text-blue-700 dark:text-blue-400">
-                        {st.admission_no ?? "—"}
-                      </td>
-                      <td className="px-5 py-3.5 whitespace-nowrap font-medium">
-                        {enr
-                          ? `${enr.school_classes?.name} (${enr.class_sections?.name})`
-                          : "Unenrolled"}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <Badge variant={statusVariant(st.status)} dot>
-                          {st.status.replace("_", " ")}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                        {!trashed ? (
-                          <div className="inline-flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => openEdit(st)}
-                              className="rounded-lg bg-blue-50 px-2.5 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-600 hover:text-white cursor-pointer"
-                            >
-                              Edit
-                            </button>
-                            <a
-                              href={`/api/admin/students/export?studentId=${st.id}`}
-                              className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-600 hover:text-white"
-                            >
-                              Download
-                            </a>
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(st, "soft")}
-                              className="rounded-lg bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-600 hover:text-white cursor-pointer"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(st, "restore")}
-                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white cursor-pointer"
-                          >
-                            Restore
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+
+                {renderStudentsTable(rows, cls)}
+              </section>
+            ))}
+
+          {groupedByClass.unenrolled.length > 0 && (
+            <section className="overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-slate-900">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-100 bg-amber-50/70 px-6 py-4 dark:border-amber-900/40 dark:bg-amber-950/20">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-black text-amber-950 dark:text-amber-200">
+                    Unenrolled Students
+                  </h2>
+                  <Badge variant="amber">
+                    {groupedByClass.unenrolled.length} Student
+                    {groupedByClass.unenrolled.length === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+              </div>
+              {renderStudentsTable(groupedByClass.unenrolled)}
+            </section>
+          )}
         </div>
       )}
+
+      {/* VALIDATED EXCEL IMPORT MODAL */}
+      <ExcelImportModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        classes={classes}
+        sections={sections}
+        defaultClassId={importTargetClassId}
+        defaultSectionId={importTargetSectionId}
+        onImported={loadData}
+      />
 
       {/* CONTINUOUS MULTI-ENTRY STUDENT ADMISSION MODAL */}
       <Modal
@@ -1077,7 +1098,7 @@ export default function StudentsPage() {
         <div className="space-y-5 text-sm">
           {!editing && addedInSession.length > 0 && (
             <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/60 px-4 py-3 dark:border-emerald-900/50 dark:bg-emerald-950/30">
-              <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="mb-2 flex items-center justify-between gap-2">
                 <p className="text-xs font-extrabold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
                   Recently Admitted ({addedInSession.length})
                 </p>
@@ -1107,7 +1128,7 @@ export default function StudentsPage() {
           {quickFamilyOpen && (
             <form
               onSubmit={handleQuickFamilyCreate}
-              className="rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4 space-y-3 dark:border-indigo-900/60 dark:bg-indigo-950/30"
+              className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50/50 p-4 dark:border-indigo-900/60 dark:bg-indigo-950/30"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1126,7 +1147,7 @@ export default function StudentsPage() {
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <div>
-                  <label className="block text-xs font-bold mb-1">Father / Guardian Name *</label>
+                  <label className="mb-1 block text-xs font-bold">Father / Guardian Name *</label>
                   <input
                     type="text"
                     required
@@ -1139,7 +1160,7 @@ export default function StudentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold mb-1">Mobile Number</label>
+                  <label className="mb-1 block text-xs font-bold">Mobile Number</label>
                   <input
                     type="tel"
                     value={quickFamily.guardian_mobile}
@@ -1151,7 +1172,7 @@ export default function StudentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold mb-1">CNIC</label>
+                  <label className="mb-1 block text-xs font-bold">CNIC</label>
                   <input
                     type="text"
                     value={quickFamily.guardian_cnic}
@@ -1192,7 +1213,7 @@ export default function StudentsPage() {
           <form onSubmit={handleSave} className="space-y-5">
             {/* 1. IDENTITY + PHOTO */}
             <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-800/40">
-              <div className="flex items-center gap-2 mb-4">
+              <div className="mb-4 flex items-center gap-2">
                 <User className="h-4 w-4 text-blue-600" />
                 <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
                   1. Student Identity
@@ -1200,7 +1221,7 @@ export default function StudentsPage() {
               </div>
 
               <div className="flex flex-col gap-5 sm:flex-row">
-                <div className="flex flex-col items-center gap-2 shrink-0">
+                <div className="flex shrink-0 flex-col items-center gap-2">
                   <input
                     ref={photoInputRef}
                     type="file"
@@ -1248,7 +1269,7 @@ export default function StudentsPage() {
                 <div className="flex-1 space-y-3.5">
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                     <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Full Name <span className="text-rose-500">*</span>
                       </label>
                       <input
@@ -1263,10 +1284,10 @@ export default function StudentsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Gender <span className="text-rose-500">*</span>
                       </label>
-                      <div className="grid grid-cols-3 gap-1.5 rounded-xl bg-white p-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-900">
+                      <div className="grid grid-cols-3 gap-1.5 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
                         {(["male", "female", "other"] as const).map((g) => (
                           <button
                             key={g}
@@ -1285,7 +1306,7 @@ export default function StudentsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Date of Birth <span className="text-rose-500">*</span>
                       </label>
                       <input
@@ -1300,7 +1321,7 @@ export default function StudentsPage() {
 
                   <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         B-Form / CNIC No
                       </label>
                       <input
@@ -1312,7 +1333,7 @@ export default function StudentsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Previous School
                       </label>
                       <input
@@ -1332,7 +1353,7 @@ export default function StudentsPage() {
 
             {/* 2. FAMILY & ADMISSION */}
             <div className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-800/40">
-              <div className="flex items-center justify-between mb-3.5">
+              <div className="mb-3.5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Home className="h-4 w-4 text-indigo-600" />
                   <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-200">
@@ -1353,7 +1374,7 @@ export default function StudentsPage() {
 
               <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Father / Guardian <span className="text-rose-500">*</span>
                   </label>
                   <select
@@ -1373,7 +1394,7 @@ export default function StudentsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Admission Date <span className="text-rose-500">*</span>
                   </label>
                   <input
@@ -1388,7 +1409,7 @@ export default function StudentsPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Admission No
                   </label>
                   <input
@@ -1403,10 +1424,10 @@ export default function StudentsPage() {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Status
                   </label>
-                  <div className="grid grid-cols-4 gap-1.5 rounded-xl bg-white p-1 border border-slate-200 dark:border-slate-700 dark:bg-slate-900">
+                  <div className="grid grid-cols-4 gap-1.5 rounded-xl border border-slate-200 bg-white p-1 dark:border-slate-700 dark:bg-slate-900">
                     {(
                       [
                         { v: "active", label: "Active" },
@@ -1457,7 +1478,7 @@ export default function StudentsPage() {
                 {enrollNow && (
                   <div className="mt-3.5 grid grid-cols-1 gap-3.5 sm:grid-cols-3">
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Class *
                       </label>
                       <select
@@ -1486,7 +1507,7 @@ export default function StudentsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Section *
                       </label>
                       <select
@@ -1507,7 +1528,7 @@ export default function StudentsPage() {
                     </div>
 
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      <label className="mb-1 block text-xs font-bold text-slate-700 dark:text-slate-300">
                         Roll No (Auto-increments)
                       </label>
                       <input

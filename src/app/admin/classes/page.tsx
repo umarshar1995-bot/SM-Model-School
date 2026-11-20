@@ -6,14 +6,17 @@ import { useRouter } from "next/navigation";
 import {
   ArrowRight,
   Building2,
+  FileSpreadsheet,
   GraduationCap,
   Layers,
   Loader2,
   Search,
+  Upload,
   UserPlus,
   Users,
 } from "lucide-react";
 import { getInitials, photoUrl } from "@/lib/format";
+import { ExcelImportModal } from "@/components/students/ExcelImportModal";
 
 interface SessionItem {
   id: number;
@@ -91,6 +94,11 @@ export default function ClassesCardsPage() {
   const [loading, setLoading] = useState(true);
   const [flippingId, setFlippingId] = useState<number | null>(null);
 
+  // Validated Excel Import Modal
+  const [importOpen, setImportOpen] = useState(false);
+  const [importClassId, setImportClassId] = useState("");
+  const [importSectionId, setImportSectionId] = useState("");
+
   const loadClasses = useCallback(async () => {
     setLoading(true);
     try {
@@ -120,7 +128,19 @@ export default function ClassesCardsPage() {
     }, 420);
   }
 
-  const filteredClasses = (data?.classes ?? []).filter((c) =>
+  function openImportForClass(cls?: ClassCardItem) {
+    setImportClassId(cls ? String(cls.id) : "");
+    setImportSectionId(cls?.sections[0] ? String(cls.sections[0].id) : "");
+    setImportOpen(true);
+  }
+
+  const allClasses = data?.classes ?? [];
+  const allClassOptions = allClasses.map((c) => ({ id: c.id, name: c.name }));
+  const allSectionOptions = allClasses.flatMap((c) =>
+    c.sections.map((s) => ({ id: s.id, name: s.name, class_id: c.id })),
+  );
+
+  const filteredClasses = allClasses.filter((c) =>
     c.name.toLowerCase().includes(search.trim().toLowerCase()),
   );
 
@@ -138,7 +158,8 @@ export default function ClassesCardsPage() {
               School Classes
             </h1>
             <p className="mt-2 text-sm text-blue-100/85 sm:text-base">
-              Click any class KPI card to flip directly into its student directory.
+              Click any class card to open its student table, or click{" "}
+              <strong>Import Excel</strong> to bulk-upload students with validation.
             </p>
           </div>
 
@@ -154,6 +175,15 @@ export default function ClassesCardsPage() {
                 </option>
               ))}
             </select>
+
+            <button
+              type="button"
+              onClick={() => openImportForClass()}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-extrabold text-white shadow-md transition hover:bg-emerald-400 cursor-pointer"
+            >
+              <Upload className="h-4 w-4" />
+              <span>Import Excel</span>
+            </button>
 
             <Link
               href="/admin/students?new=1"
@@ -221,7 +251,7 @@ export default function ClassesCardsPage() {
         </p>
       </div>
 
-      {/* 3D FLIPPABLE CLASS KPI CARDS GRID */}
+      {/* 3D FLIPPABLE CLASS KPI CARDS */}
       {loading ? (
         <div className="flex items-center justify-center py-24 text-blue-600">
           <Loader2 className="h-7 w-7 animate-spin" />
@@ -251,7 +281,7 @@ export default function ClassesCardsPage() {
                     handleCardClick(cls);
                   }
                 }}
-                className="flip-perspective group h-[250px] cursor-pointer focus:outline-none"
+                className="flip-perspective group h-[262px] cursor-pointer focus:outline-none"
               >
                 <div
                   className={`flip-card-inner ${isFlipped ? "is-flipped" : ""}`}
@@ -267,7 +297,7 @@ export default function ClassesCardsPage() {
                     <div>
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <h2 className="text-xl font-extrabold tracking-tight text-slate-950 group-hover:text-blue-700 transition dark:text-white dark:group-hover:text-blue-400">
+                          <h2 className="text-xl font-extrabold tracking-tight text-slate-950 transition group-hover:text-blue-700 dark:text-white dark:group-hover:text-blue-400">
                             {cls.name}
                           </h2>
                           <p className="mt-0.5 text-sm font-medium text-slate-500 dark:text-slate-400">
@@ -295,7 +325,6 @@ export default function ClassesCardsPage() {
                           </span>
                         </div>
 
-                        {/* Avatar Stack */}
                         {cls.previewAvatars.length > 0 && (
                           <div className="flex -space-x-2">
                             {cls.previewAvatars.map((av) => {
@@ -339,13 +368,26 @@ export default function ClassesCardsPage() {
                       </div>
                     </div>
 
-                    {/* FOOTER PROMPT */}
-                    <div className="flex items-center justify-between border-t border-slate-100 pt-3 text-sm font-bold text-blue-700 dark:border-slate-800 dark:text-blue-400">
-                      <span className="inline-flex items-center gap-1.5">
+                    {/* FOOTER PROMPT + DIRECT EXCEL IMPORT FOR THIS CLASS */}
+                    <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                      <span className="inline-flex items-center gap-1.5 text-sm font-bold text-blue-700 dark:text-blue-400">
                         <Users className="h-4 w-4" />
-                        <span>View Students</span>
+                        <span>View Table</span>
+                        <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
                       </span>
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openImportForClass(cls);
+                        }}
+                        className="inline-flex items-center gap-1 rounded-xl bg-emerald-50 px-2.5 py-1.5 text-xs font-extrabold text-emerald-700 transition hover:bg-emerald-600 hover:text-white dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-600 dark:hover:text-white cursor-pointer"
+                        title={`Import Excel directly into ${cls.name}`}
+                      >
+                        <FileSpreadsheet className="h-3.5 w-3.5" />
+                        <span>Import</span>
+                      </button>
                     </div>
                   </article>
 
@@ -361,7 +403,7 @@ export default function ClassesCardsPage() {
                     </h3>
                     <p className="mt-1 text-sm font-semibold text-blue-100">
                       Opening {cls.totalStudents} Student Record
-                      {cls.totalStudents === 1 ? "" : "s"}...
+                      {cls.totalStudents === 1 ? "" : "s"} Table...
                     </p>
                     <Loader2 className="mt-4 h-5 w-5 animate-spin text-amber-300" />
                   </div>
@@ -371,6 +413,17 @@ export default function ClassesCardsPage() {
           })}
         </section>
       )}
+
+      {/* VALIDATED EXCEL IMPORT MODAL */}
+      <ExcelImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        classes={allClassOptions}
+        sections={allSectionOptions}
+        defaultClassId={importClassId}
+        defaultSectionId={importSectionId}
+        onImported={loadClasses}
+      />
     </div>
   );
 }
