@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: var(--font-jakarta), var(--font-inter), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-jakarta), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-cinzel: var(--font-cinzel-face), Georgia, serif;
+  --font-playfair: var(--font-playfair-face), Georgia, serif;
+
+  --color-school-950: #0c1d36;
+  --color-school-900: #102a43;
+  --color-school-800: #163d66;
+  --color-school-700: #1d4f85;
+  --color-school-600: #2563a6;
+  --color-school-500: #3b82f6;
+  --color-school-400: #60a5fa;
+  --color-school-300: #93bbfd;
+  --color-school-200: #bdd5fe;
+  --color-school-100: #dbeafe;
+  --color-school-50: #eff6ff;
+}
+
+:root {
+  --school-surface: #ffffff;
+  --school-surface-raised: #f8fafc;
+  --school-ink: #0f172a;
+  --school-ink-secondary: #334155;
+  --school-muted: #64748b;
+  --school-border: #e2e8f0;
+  --school-gradient-start: #1e40af;
+  --school-gradient-mid: #3b82f6;
+  --school-gradient-end: #4f46e5;
+}
+
+.dark {
+  --school-surface: #0f172a;
+  --school-surface-raised: #1e293b;
+  --school-ink: #f1f5f9;
+  --school-ink-secondary: #cbd5e1;
+  --school-muted: #94a3b8;
+  --school-border: #334155;
+  --school-gradient-start: #172554;
+  --school-gradient-mid: #1e3a8a;
+  --school-gradient-end: #312e81;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  background-color: var(--school-surface-raised);
+  color: var(--school-ink);
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.015em;
+}
+
+/* 3D Flip Card Utilities */
+.flip-perspective {
+  perspective: 1200px;
+}
+
+.flip-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.flip-card-inner.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.flip-card-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.flip-card-back {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: rotateY(180deg);
+}
+
+.school-hero-gradient {
+  background: linear-gradient(
+    135deg,
+    var(--school-gradient-start) 0%,
+    var(--school-gradient-mid) 50%,
+    var(--school-gradient-end) 100%
+  );
+  background-size: 200% 200%;
+  animation: hero-shift 10s ease infinite;
+}
+
+@keyframes hero-shift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-page-in {
+  animation: page-in 260ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.font-cinzel {
+  font-family: var(--font-cinzel);
+}
+
+.font-playfair {
+  font-family: var(--font-playfair);
+}
+
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 0.35);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(100 116 139 / 0.55);
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

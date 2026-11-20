@@ -1,0 +1,6 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "icacls": true,
+        "Get-Acl": true
+    }
+}

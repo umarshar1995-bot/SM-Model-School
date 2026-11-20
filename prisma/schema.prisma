@@ -1,0 +1,713 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model academic_sessions {
+  id                          BigInt                        @id @default(autoincrement())
+  name                        String                        @unique(map: "academic_sessions_name_unique") @db.VarChar(20)
+  start_date                  DateTime?                     @db.Date
+  end_date                    DateTime?                     @db.Date
+  is_current                  Boolean                       @default(false)
+  is_active                   Boolean                       @default(true)
+  deleted_at                  DateTime?                     @db.Timestamp(0)
+  created_at                  DateTime?                     @db.Timestamp(0)
+  updated_at                  DateTime?                     @db.Timestamp(0)
+  class_fee_amounts           class_fee_amounts[]
+  class_fee_structures        class_fee_structures[]
+  class_subjects              class_subjects[]
+  family_fee_challans         family_fee_challans[]
+  id_cards                    id_cards[]
+  student_enrollments         student_enrollments[]
+  student_fees                student_fees[]
+  student_leaves              student_leaves[]
+  teacher_sections            teacher_sections[]
+  teacher_subject_assignments teacher_subject_assignments[]
+
+  @@index([is_active], map: "academic_sessions_is_active_index")
+  @@index([is_current], map: "academic_sessions_is_current_index")
+}
+
+model cache {
+  key        String @id @db.VarChar(255)
+  value      String
+  expiration BigInt
+
+  @@index([expiration], map: "cache_expiration_index")
+}
+
+model cache_locks {
+  key        String @id @db.VarChar(255)
+  owner      String @db.VarChar(255)
+  expiration BigInt
+
+  @@index([expiration], map: "cache_locks_expiration_index")
+}
+
+model card_template_class_group {
+  card_template_id BigInt
+  class_group_id   BigInt
+  card_templates   card_templates @relation(fields: [card_template_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "card_template_class_group_card_template_id_foreign")
+  class_groups     class_groups   @relation(fields: [class_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "card_template_class_group_class_group_id_foreign")
+
+  @@id([card_template_id, class_group_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model card_templates {
+  id                        BigInt                      @id @default(autoincrement())
+  slug                      String                      @unique(map: "card_templates_slug_unique") @db.VarChar(80)
+  name                      String                      @db.VarChar(120)
+  template_type             String                      @db.VarChar(255)
+  orientation               String                      @default("portrait") @db.VarChar(255)
+  front_view                String                      @db.VarChar(180)
+  back_view                 String                      @db.VarChar(180)
+  settings                  Json?                       @db.Json
+  is_active                 Boolean                     @default(true)
+  is_default                Boolean                     @default(false)
+  deleted_at                DateTime?                   @db.Timestamp(0)
+  created_at                DateTime?                   @db.Timestamp(0)
+  updated_at                DateTime?                   @db.Timestamp(0)
+  card_template_class_group card_template_class_group[]
+  id_cards                  id_cards[]
+
+  @@index([is_active, is_default], map: "card_templates_is_active_is_default_index")
+  @@index([template_type, orientation], map: "card_templates_template_type_orientation_index")
+}
+
+model class_fee_structures {
+  id                  BigInt             @id @default(autoincrement())
+  school_class_id     BigInt
+  academic_session_id BigInt?
+  tuition_fee         Decimal            @default(0) @db.Decimal(10, 2)
+  admission_fee       Decimal            @default(0) @db.Decimal(10, 2)
+  exam_fee            Decimal            @default(0) @db.Decimal(10, 2)
+  computer_fee        Decimal            @default(0) @db.Decimal(10, 2)
+  activity_fee        Decimal            @default(0) @db.Decimal(10, 2)
+  late_fine           Decimal            @default(200) @db.Decimal(10, 2)
+  created_at          DateTime?          @db.Timestamp(0)
+  updated_at          DateTime?          @db.Timestamp(0)
+  deleted_at          DateTime?          @db.Timestamp(0)
+  academic_sessions   academic_sessions? @relation(fields: [academic_session_id], references: [id], onUpdate: NoAction, map: "class_fee_structures_academic_session_id_foreign")
+  school_classes      school_classes     @relation(fields: [school_class_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_fee_structures_school_class_id_foreign")
+
+  @@unique([school_class_id, academic_session_id], map: "class_fee_structures_school_class_id_academic_session_id_unique")
+}
+
+model class_group_classes {
+  class_group_id  BigInt
+  school_class_id BigInt
+  class_groups    class_groups   @relation(fields: [class_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_group_classes_class_group_id_foreign")
+  school_classes  school_classes @relation(fields: [school_class_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_group_classes_school_class_id_foreign")
+
+  @@id([class_group_id, school_class_id])
+}
+
+model class_groups {
+  id                        BigInt                      @id @default(autoincrement())
+  name                      String                      @unique(map: "class_groups_name_unique") @db.VarChar(100)
+  code                      String                      @unique(map: "class_groups_code_unique") @db.VarChar(50)
+  sort_order                Int                         @default(0)
+  is_active                 Boolean                     @default(true)
+  created_at                DateTime?                   @db.Timestamp(0)
+  updated_at                DateTime?                   @db.Timestamp(0)
+  card_template_class_group card_template_class_group[]
+  class_group_classes       class_group_classes[]
+
+  @@index([is_active, sort_order], map: "class_groups_is_active_sort_order_index")
+}
+
+model class_sections {
+  id                          BigInt                        @id @default(autoincrement())
+  class_id                    BigInt
+  name                        String                        @db.VarChar(10)
+  capacity                    Int?
+  class_teacher_user_id       BigInt?
+  is_active                   Boolean                       @default(true)
+  deleted_at                  DateTime?                     @db.Timestamp(0)
+  created_at                  DateTime?                     @db.Timestamp(0)
+  updated_at                  DateTime?                     @db.Timestamp(0)
+  school_classes              school_classes                @relation(fields: [class_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_sections_class_id_foreign")
+  users                       users?                        @relation(fields: [class_teacher_user_id], references: [id], onUpdate: NoAction, map: "class_sections_class_teacher_user_id_foreign")
+  student_enrollments         student_enrollments[]
+  teacher_sections            teacher_sections[]
+  teacher_subject_assignments teacher_subject_assignments[]
+
+  @@unique([class_id, name], map: "class_sections_class_id_name_unique")
+  @@index([class_id], map: "class_sections_class_id_index")
+  @@index([class_teacher_user_id], map: "class_sections_class_teacher_user_id_index")
+  @@index([is_active], map: "class_sections_is_active_index")
+}
+
+model class_subjects {
+  id                  BigInt            @id @default(autoincrement())
+  academic_session_id BigInt
+  school_class_id     BigInt
+  subject_id          BigInt
+  total_marks         Int               @default(100)
+  pass_marks          Int               @default(40)
+  counts_toward_total Boolean           @default(true)
+  is_optional         Boolean           @default(false)
+  deleted_at          DateTime?         @db.Timestamp(0)
+  created_at          DateTime?         @db.Timestamp(0)
+  updated_at          DateTime?         @db.Timestamp(0)
+  academic_sessions   academic_sessions @relation(fields: [academic_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_subjects_academic_session_id_foreign")
+  school_classes      school_classes    @relation(fields: [school_class_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_subjects_school_class_id_foreign")
+  subjects            subjects          @relation(fields: [subject_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "class_subjects_subject_id_foreign")
+
+  @@unique([academic_session_id, school_class_id, subject_id], map: "class_subjects_academic_session_id_school_class_id_subject_id_u")
+  @@index([academic_session_id, school_class_id], map: "class_subjects_academic_session_id_school_class_id_index")
+  @@index([subject_id], map: "class_subjects_subject_id_index")
+}
+
+model failed_jobs {
+  id         BigInt   @id @default(autoincrement())
+  uuid       String   @unique(map: "failed_jobs_uuid_unique") @db.VarChar(255)
+  connection String   @db.VarChar(255)
+  queue      String   @db.VarChar(255)
+  payload    String
+  exception  String
+  failed_at  DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([connection, queue, failed_at], map: "failed_jobs_connection_queue_failed_at_index")
+}
+
+model families {
+  id                  BigInt                @id @default(autoincrement())
+  family_number       BigInt                @unique(map: "families_family_number_unique")
+  guardian_name       String                @db.VarChar(150)
+  guardian_mobile     String?               @db.VarChar(20)
+  guardian_cnic       String?               @db.VarChar(20)
+  address             String?
+  is_active           Boolean               @default(true)
+  deleted_at          DateTime?             @db.Timestamp(0)
+  created_at          DateTime?             @db.Timestamp(0)
+  updated_at          DateTime?             @db.Timestamp(0)
+  family_fee_challans family_fee_challans[]
+  students            students[]
+
+  @@index([guardian_mobile], map: "families_guardian_mobile_index")
+  @@index([guardian_name], map: "families_guardian_name_index")
+  @@index([is_active], map: "families_is_active_index")
+}
+
+model family_fee_challans {
+  id                   BigInt             @id @default(autoincrement())
+  challan_no           String             @unique(map: "family_fee_challans_challan_no_unique") @db.VarChar(60)
+  family_id            BigInt
+  academic_session_id  BigInt?
+  billing_month        String             @db.VarChar(40)
+  issue_date           DateTime           @db.Date
+  due_date             DateTime           @db.Date
+  total_gross          Decimal            @default(0) @db.Decimal(10, 2)
+  total_concession     Decimal            @default(0) @db.Decimal(10, 2)
+  total_arrears        Decimal            @default(0) @db.Decimal(10, 2)
+  late_fine            Decimal            @default(0) @db.Decimal(10, 2)
+  payable_before_due   Decimal            @default(0) @db.Decimal(10, 2)
+  payable_after_due    Decimal            @default(0) @db.Decimal(10, 2)
+  paid_amount          Decimal            @default(0) @db.Decimal(10, 2)
+  status               String             @default("unpaid") @db.VarChar(20)
+  paid_date            DateTime?          @db.Date
+  payment_method       String?            @db.VarChar(50)
+  notes                String?
+  created_at           DateTime?          @db.Timestamp(0)
+  updated_at           DateTime?          @db.Timestamp(0)
+  deleted_at           DateTime?          @db.Timestamp(0)
+  late_fine_applied_at DateTime?          @db.Timestamp(0)
+  academic_sessions    academic_sessions? @relation(fields: [academic_session_id], references: [id], onUpdate: NoAction, map: "family_fee_challans_academic_session_id_foreign")
+  families             families           @relation(fields: [family_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "family_fee_challans_family_id_foreign")
+  fee_payments         fee_payments[]
+  student_fees         student_fees[]
+
+  @@index([billing_month, status], map: "family_fee_challans_billing_month_status_index")
+  @@index([family_id, status], map: "family_fee_challans_family_id_status_index")
+}
+
+model fee_payments {
+  id                                            BigInt               @id @default(autoincrement())
+  receipt_no                                    String               @unique(map: "fee_payments_receipt_no_unique") @db.VarChar(60)
+  family_fee_challan_id                         BigInt?
+  student_fee_id                                BigInt?
+  amount_paid                                   Decimal              @db.Decimal(10, 2)
+  payment_date                                  DateTime             @db.Date
+  payment_method                                String               @default("Cash") @db.VarChar(50)
+  transaction_reference                         String?              @db.VarChar(100)
+  collected_by_user_id                          BigInt?
+  remarks                                       String?
+  created_at                                    DateTime?            @db.Timestamp(0)
+  updated_at                                    DateTime?            @db.Timestamp(0)
+  deleted_at                                    DateTime?            @db.Timestamp(0)
+  idempotency_key                               String?              @db.VarChar(80)
+  status                                        String               @default("posted") @db.VarChar(20)
+  reversed_at                                   DateTime?            @db.Timestamp(0)
+  reversed_by_user_id                           BigInt?
+  reversal_reason                               String?
+  users                                         users?               @relation(fields: [collected_by_user_id], references: [id], onUpdate: NoAction, map: "fee_payments_collected_by_user_id_foreign")
+  family_fee_challans                           family_fee_challans? @relation(fields: [family_fee_challan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fee_payments_family_fee_challan_id_foreign")
+  users_fee_payments_reversed_by_user_idTousers users?               @relation("fee_payments_reversed_by_user_idTousers", fields: [reversed_by_user_id], references: [id], onUpdate: NoAction)
+  student_fees                                  student_fees?        @relation(fields: [student_fee_id], references: [id], onUpdate: NoAction, map: "fee_payments_student_fee_id_foreign")
+
+  @@index([payment_date], map: "fee_payments_payment_date_index")
+}
+
+model id_cards {
+  id                  BigInt             @id @default(autoincrement())
+  card_template_id    BigInt
+  academic_session_id BigInt?
+  cardable_type       String             @db.VarChar(255)
+  cardable_id         BigInt
+  card_number         String             @unique(map: "id_cards_card_number_unique") @db.VarChar(40)
+  token_hash          String             @unique(map: "id_cards_token_hash_unique") @db.Char(64)
+  issued_at           DateTime?          @db.Timestamp(0)
+  expires_at          DateTime?          @db.Timestamp(0)
+  revoked_at          DateTime?          @db.Timestamp(0)
+  metadata            Json?              @db.Json
+  created_at          DateTime?          @db.Timestamp(0)
+  updated_at          DateTime?          @db.Timestamp(0)
+  academic_sessions   academic_sessions? @relation(fields: [academic_session_id], references: [id], onUpdate: NoAction, map: "id_cards_academic_session_id_foreign")
+  card_templates      card_templates     @relation(fields: [card_template_id], references: [id], onUpdate: NoAction, map: "id_cards_card_template_id_foreign")
+
+  @@index([cardable_type, cardable_id], map: "id_cards_cardable_type_cardable_id_index")
+  @@index([revoked_at, expires_at], map: "id_cards_revoked_at_expires_at_index")
+}
+
+model job_batches {
+  id             String  @id @db.VarChar(255)
+  name           String  @db.VarChar(255)
+  total_jobs     Int
+  pending_jobs   Int
+  failed_jobs    Int
+  failed_job_ids String
+  options        String?
+  cancelled_at   Int?
+  created_at     Int
+  finished_at    Int?
+}
+
+model jobs {
+  id           BigInt @id @default(autoincrement())
+  queue        String @db.VarChar(255)
+  payload      String
+  attempts     Int    @db.SmallInt
+  reserved_at  Int?
+  available_at Int
+  created_at   Int
+
+  @@index([queue], map: "jobs_queue_index")
+}
+
+model migrations {
+  id        Int    @id @default(autoincrement())
+  migration String @db.VarChar(255)
+  batch     Int
+}
+
+model model_has_permissions {
+  permission_id BigInt
+  model_type    String      @db.VarChar(255)
+  model_id      BigInt
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "model_has_permissions_permission_id_foreign")
+
+  @@id([permission_id, model_id, model_type])
+  @@index([model_id, model_type], map: "model_has_permissions_model_id_model_type_index")
+}
+
+model model_has_roles {
+  role_id    BigInt
+  model_type String @db.VarChar(255)
+  model_id   BigInt
+  roles      roles  @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "model_has_roles_role_id_foreign")
+
+  @@id([role_id, model_id, model_type])
+  @@index([model_id, model_type], map: "model_has_roles_model_id_model_type_index")
+}
+
+model notifications {
+  id              String    @id @db.Uuid
+  type            String    @db.VarChar(255)
+  notifiable_type String    @db.VarChar(255)
+  notifiable_id   BigInt
+  data            Json
+  read_at         DateTime? @db.Timestamp(0)
+  created_at      DateTime? @db.Timestamp(0)
+  updated_at      DateTime? @db.Timestamp(0)
+
+  @@index([notifiable_type, notifiable_id], map: "notifications_notifiable_type_notifiable_id_index")
+}
+
+model password_reset_tokens {
+  email      String    @id @db.VarChar(255)
+  token      String    @db.VarChar(255)
+  created_at DateTime? @db.Timestamp(0)
+}
+
+model permissions {
+  id                    BigInt                  @id @default(autoincrement())
+  name                  String                  @db.VarChar(255)
+  guard_name            String                  @db.VarChar(255)
+  created_at            DateTime?               @db.Timestamp(0)
+  updated_at            DateTime?               @db.Timestamp(0)
+  model_has_permissions model_has_permissions[]
+  role_has_permissions  role_has_permissions[]
+
+  @@unique([name, guard_name], map: "permissions_name_guard_name_unique")
+}
+
+model role_has_permissions {
+  permission_id BigInt
+  role_id       BigInt
+  permissions   permissions @relation(fields: [permission_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "role_has_permissions_permission_id_foreign")
+  roles         roles       @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "role_has_permissions_role_id_foreign")
+
+  @@id([permission_id, role_id])
+}
+
+model roles {
+  id                   BigInt                 @id @default(autoincrement())
+  name                 String                 @db.VarChar(255)
+  guard_name           String                 @db.VarChar(255)
+  created_at           DateTime?              @db.Timestamp(0)
+  updated_at           DateTime?              @db.Timestamp(0)
+  model_has_roles      model_has_roles[]
+  role_has_permissions role_has_permissions[]
+
+  @@unique([name, guard_name], map: "roles_name_guard_name_unique")
+}
+
+model school_classes {
+  id                   BigInt                 @id @default(autoincrement())
+  name                 String                 @unique(map: "school_classes_name_unique") @db.VarChar(50)
+  sort_order           Int                    @default(0)
+  is_active            Boolean                @default(true)
+  deleted_at           DateTime?              @db.Timestamp(0)
+  created_at           DateTime?              @db.Timestamp(0)
+  updated_at           DateTime?              @db.Timestamp(0)
+  class_fee_amounts    class_fee_amounts[]
+  class_fee_structures class_fee_structures[]
+  class_group_classes  class_group_classes[]
+  class_sections       class_sections[]
+  class_subjects       class_subjects[]
+  student_enrollments  student_enrollments[]
+
+  @@index([is_active], map: "school_classes_is_active_index")
+  @@index([sort_order], map: "school_classes_sort_order_index")
+}
+
+model sessions {
+  id            String  @id @db.VarChar(255)
+  user_id       BigInt?
+  ip_address    String? @db.VarChar(45)
+  user_agent    String?
+  payload       String
+  last_activity Int
+
+  @@index([last_activity], map: "sessions_last_activity_index")
+  @@index([user_id], map: "sessions_user_id_index")
+}
+
+model settings {
+  id         BigInt    @id @default(autoincrement())
+  key        String    @unique(map: "settings_key_unique") @db.VarChar(255)
+  value      Json?     @db.Json
+  group_name String?   @db.VarChar(50)
+  is_system  Boolean   @default(false)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+
+  @@index([group_name], map: "settings_group_name_index")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model student_enrollments {
+  id                BigInt            @id @default(autoincrement())
+  student_id        BigInt
+  session_id        BigInt
+  class_id          BigInt
+  section_id        BigInt
+  roll_no           String?           @db.VarChar(20)
+  status            String            @default("active") @db.VarChar(255)
+  admission_date    DateTime?         @db.Date
+  deleted_at        DateTime?         @db.Timestamp(0)
+  created_at        DateTime?         @db.Timestamp(0)
+  updated_at        DateTime?         @db.Timestamp(0)
+  school_classes    school_classes    @relation(fields: [class_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_enrollments_class_id_foreign")
+  class_sections    class_sections    @relation(fields: [section_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_enrollments_section_id_foreign")
+  academic_sessions academic_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_enrollments_session_id_foreign")
+  students          students          @relation(fields: [student_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_enrollments_student_id_foreign")
+  student_fees      student_fees[]
+
+  @@unique([student_id, session_id], map: "student_enrollments_student_id_session_id_unique")
+  @@index([class_id], map: "student_enrollments_class_id_index")
+  @@index([section_id], map: "student_enrollments_section_id_index")
+  @@index([session_id], map: "student_enrollments_session_id_index")
+  @@index([status], map: "student_enrollments_status_index")
+  @@index([student_id], map: "student_enrollments_student_id_index")
+}
+
+model student_fees {
+  id                    BigInt               @id @default(autoincrement())
+  student_id            BigInt
+  academic_session_id   BigInt?
+  challan_no            String               @unique(map: "student_fees_challan_no_unique") @db.VarChar(60)
+  fee_type              String               @default("Monthly Tuition") @db.VarChar(60)
+  billing_month         String               @db.VarChar(30)
+  amount                Decimal              @default(0) @db.Decimal(10, 2)
+  concession_amount     Decimal              @default(0) @db.Decimal(10, 2)
+  paid_amount           Decimal              @default(0) @db.Decimal(10, 2)
+  due_amount            Decimal              @default(0) @db.Decimal(10, 2)
+  due_date              DateTime             @db.Date
+  paid_date             DateTime?            @db.Date
+  status                String               @default("unpaid") @db.VarChar(20)
+  payment_method        String?              @db.VarChar(50)
+  remarks               String?              @db.VarChar(255)
+  created_at            DateTime?            @db.Timestamp(0)
+  updated_at            DateTime?            @db.Timestamp(0)
+  deleted_at            DateTime?            @db.Timestamp(0)
+  family_fee_challan_id BigInt?
+  arrears_amount        Decimal              @default(0) @db.Decimal(10, 2)
+  late_fine             Decimal              @default(0) @db.Decimal(10, 2)
+  net_payable           Decimal              @default(0) @db.Decimal(10, 2)
+  fee_type_id           BigInt?
+  student_enrollment_id BigInt?
+  billing_key           String?              @db.VarChar(120)
+  fee_payments          fee_payments[]
+  academic_sessions     academic_sessions?   @relation(fields: [academic_session_id], references: [id], onUpdate: NoAction, map: "student_fees_academic_session_id_foreign")
+  family_fee_challans   family_fee_challans? @relation(fields: [family_fee_challan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_fees_family_fee_challan_id_foreign")
+  fee_types             fee_types?           @relation(fields: [fee_type_id], references: [id], onUpdate: NoAction)
+  student_enrollments   student_enrollments? @relation(fields: [student_enrollment_id], references: [id], onUpdate: NoAction)
+  students              students             @relation(fields: [student_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_fees_student_id_foreign")
+
+  @@index([billing_month, status], map: "student_fees_billing_month_status_index")
+  @@index([student_id, status], map: "student_fees_student_id_status_index")
+  @@index([student_id, academic_session_id, fee_type_id, billing_key], map: "student_fees_billing_key_idx")
+  @@index([fee_type_id], map: "student_fees_fee_type_idx")
+}
+
+model student_leaves {
+  id                  BigInt             @id @default(autoincrement())
+  student_id          BigInt
+  academic_session_id BigInt?
+  leave_type          String             @default("Sick Leave") @db.VarChar(50)
+  start_date          DateTime           @db.Date
+  end_date            DateTime           @db.Date
+  days_count          Int                @default(1) @db.SmallInt
+  reason              String?
+  status              String             @default("approved") @db.VarChar(20)
+  approved_by         String?            @db.VarChar(255)
+  created_at          DateTime?          @db.Timestamp(0)
+  updated_at          DateTime?          @db.Timestamp(0)
+  deleted_at          DateTime?          @db.Timestamp(0)
+  academic_sessions   academic_sessions? @relation(fields: [academic_session_id], references: [id], onUpdate: NoAction, map: "student_leaves_academic_session_id_foreign")
+  students            students           @relation(fields: [student_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "student_leaves_student_id_foreign")
+
+  @@index([student_id, status], map: "student_leaves_student_id_status_index")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model students {
+  id                  BigInt                @id @default(autoincrement())
+  family_id           BigInt
+  admission_no        String?               @unique(map: "students_admission_no_unique") @db.VarChar(50)
+  full_name           String                @db.VarChar(180)
+  name_urdu           String?               @db.VarChar(180)
+  gender              String                @db.VarChar(255)
+  dob                 DateTime              @db.Date
+  b_form_no           String?               @db.VarChar(20)
+  photo_path          String?               @db.VarChar(255)
+  previous_school     String?               @db.VarChar(180)
+  admission_date      DateTime              @db.Date
+  status              String                @default("active") @db.VarChar(255)
+  deleted_at          DateTime?             @db.Timestamp(0)
+  created_at          DateTime?             @db.Timestamp(0)
+  updated_at          DateTime?             @db.Timestamp(0)
+  student_enrollments student_enrollments[]
+  student_fees        student_fees[]
+  student_leaves      student_leaves[]
+  families            families              @relation(fields: [family_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "students_family_id_foreign")
+
+  @@index([admission_date], map: "students_admission_date_index")
+  @@index([family_id], map: "students_family_id_index")
+  @@index([full_name], map: "students_full_name_index")
+  @@index([status], map: "students_status_index")
+}
+
+model subjects {
+  id                          BigInt                        @id @default(autoincrement())
+  name                        String                        @unique(map: "subjects_name_unique") @db.VarChar(100)
+  name_urdu                   String?                       @db.VarChar(100)
+  code                        String                        @unique(map: "subjects_code_unique") @db.VarChar(30)
+  sort_order                  Int                           @default(0)
+  is_active                   Boolean                       @default(true)
+  deleted_at                  DateTime?                     @db.Timestamp(0)
+  created_at                  DateTime?                     @db.Timestamp(0)
+  updated_at                  DateTime?                     @db.Timestamp(0)
+  class_subjects              class_subjects[]
+  teacher_subject_assignments teacher_subject_assignments[]
+
+  @@index([is_active, sort_order], map: "subjects_is_active_sort_order_index")
+}
+
+model teacher_devices {
+  id           BigInt    @id @default(autoincrement())
+  teacher_id   BigInt
+  token_hash   String    @unique(map: "teacher_devices_token_hash_unique") @db.Char(64)
+  name         String?   @db.VarChar(120)
+  last_used_at DateTime? @db.Timestamp(0)
+  revoked_at   DateTime? @db.Timestamp(0)
+  created_at   DateTime? @db.Timestamp(0)
+  updated_at   DateTime? @db.Timestamp(0)
+  teachers     teachers  @relation(fields: [teacher_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_devices_teacher_id_foreign")
+
+  @@index([teacher_id, revoked_at], map: "teacher_devices_teacher_id_revoked_at_index")
+}
+
+model teacher_invites {
+  id         BigInt    @id @default(autoincrement())
+  teacher_id BigInt
+  created_by BigInt?
+  token_hash String    @unique(map: "teacher_invites_token_hash_unique") @db.Char(64)
+  expires_at DateTime  @db.Timestamp(0)
+  used_at    DateTime? @db.Timestamp(0)
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+  users      users?    @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "teacher_invites_created_by_foreign")
+  teachers   teachers  @relation(fields: [teacher_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_invites_teacher_id_foreign")
+
+  @@index([expires_at], map: "teacher_invites_expires_at_index")
+  @@index([teacher_id, used_at], map: "teacher_invites_teacher_id_used_at_index")
+}
+
+model teacher_sections {
+  id                  BigInt            @id @default(autoincrement())
+  academic_session_id BigInt
+  teacher_id          BigInt
+  section_id          BigInt
+  is_class_teacher    Boolean           @default(false)
+  created_at          DateTime?         @db.Timestamp(0)
+  updated_at          DateTime?         @db.Timestamp(0)
+  academic_sessions   academic_sessions @relation(fields: [academic_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_sections_academic_session_id_foreign")
+  class_sections      class_sections    @relation(fields: [section_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_sections_section_id_foreign")
+  teachers            teachers          @relation(fields: [teacher_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_sections_teacher_id_foreign")
+
+  @@unique([academic_session_id, teacher_id, section_id], map: "teacher_sections_academic_session_id_teacher_id_section_id_uniq")
+  @@index([academic_session_id, section_id], map: "teacher_sections_academic_session_id_section_id_index")
+  @@index([teacher_id, is_class_teacher], map: "teacher_sections_teacher_id_is_class_teacher_index")
+}
+
+model teacher_subject_assignments {
+  id                  BigInt            @id @default(autoincrement())
+  academic_session_id BigInt
+  teacher_id          BigInt
+  section_id          BigInt
+  subject_id          BigInt
+  created_at          DateTime?         @db.Timestamp(0)
+  updated_at          DateTime?         @db.Timestamp(0)
+  academic_sessions   academic_sessions @relation(fields: [academic_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_subject_assignments_academic_session_id_foreign")
+  class_sections      class_sections    @relation(fields: [section_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_subject_assignments_section_id_foreign")
+  subjects            subjects          @relation(fields: [subject_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_subject_assignments_subject_id_foreign")
+  teachers            teachers          @relation(fields: [teacher_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "teacher_subject_assignments_teacher_id_foreign")
+
+  @@unique([academic_session_id, teacher_id, section_id, subject_id], map: "teacher_subject_assignments_academic_session_id_teacher_id_sect")
+  @@index([academic_session_id, section_id], map: "teacher_subject_assignments_academic_session_id_section_id_inde")
+  @@index([subject_id], map: "teacher_subject_assignments_subject_id_index")
+  @@index([teacher_id], map: "teacher_subject_assignments_teacher_id_index")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model teachers {
+  id                          BigInt                        @id @default(autoincrement())
+  user_id                     BigInt?                       @unique(map: "teachers_user_id_unique")
+  name                        String                        @db.VarChar(150)
+  mobile                      String?                       @db.VarChar(20)
+  employee_no                 String?                       @unique(map: "teachers_employee_no_unique") @db.VarChar(50)
+  photo_path                  String?                       @db.VarChar(255)
+  status                      String                        @default("active") @db.VarChar(255)
+  deleted_at                  DateTime?                     @db.Timestamp(0)
+  created_at                  DateTime?                     @db.Timestamp(0)
+  updated_at                  DateTime?                     @db.Timestamp(0)
+  teacher_devices             teacher_devices[]
+  teacher_invites             teacher_invites[]
+  teacher_sections            teacher_sections[]
+  teacher_subject_assignments teacher_subject_assignments[]
+  users                       users?                        @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "teachers_user_id_foreign")
+
+  @@index([mobile], map: "teachers_mobile_index")
+  @@index([name], map: "teachers_name_index")
+  @@index([status], map: "teachers_status_index")
+}
+
+model users {
+  id                                                   BigInt              @id @default(autoincrement())
+  name                                                 String              @db.VarChar(255)
+  email                                                String              @unique(map: "users_email_unique") @db.VarChar(255)
+  email_verified_at                                    DateTime?           @db.Timestamp(0)
+  password                                             String              @db.VarChar(255)
+  remember_token                                       String?             @db.VarChar(100)
+  created_at                                           DateTime?           @db.Timestamp(0)
+  updated_at                                           DateTime?           @db.Timestamp(0)
+  class_fee_amounts                                    class_fee_amounts[]
+  class_sections                                       class_sections[]
+  fee_audit_logs                                       fee_audit_logs[]
+  fee_payments                                         fee_payments[]
+  fee_payments_fee_payments_reversed_by_user_idTousers fee_payments[]      @relation("fee_payments_reversed_by_user_idTousers")
+  teacher_invites                                      teacher_invites[]
+  teachers                                             teachers?
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model class_fee_amounts {
+  id                  BigInt            @id @default(autoincrement())
+  school_class_id     BigInt
+  academic_session_id BigInt
+  fee_type_id         BigInt
+  amount              Decimal           @default(0) @db.Decimal(10, 2)
+  updated_by_user_id  BigInt?
+  created_at          DateTime?         @default(now()) @db.Timestamp(0)
+  updated_at          DateTime?         @default(now()) @db.Timestamp(0)
+  academic_sessions   academic_sessions @relation(fields: [academic_session_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  fee_types           fee_types         @relation(fields: [fee_type_id], references: [id], onUpdate: NoAction)
+  school_classes      school_classes    @relation(fields: [school_class_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users               users?            @relation(fields: [updated_by_user_id], references: [id], onUpdate: NoAction)
+
+  @@unique([school_class_id, academic_session_id, fee_type_id], map: "class_fee_amounts_unique")
+  @@index([school_class_id], map: "class_fee_amounts_class_idx")
+  @@index([academic_session_id], map: "class_fee_amounts_session_idx")
+}
+
+model fee_audit_logs {
+  id          BigInt   @id @default(autoincrement())
+  user_id     BigInt?
+  user_name   String   @db.VarChar(255)
+  action      String   @db.VarChar(50)
+  entity_type String   @db.VarChar(50)
+  entity_id   BigInt?
+  old_values  Json?
+  new_values  Json?
+  reason      String?
+  ip_address  String?  @db.VarChar(45)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+  users       users?   @relation(fields: [user_id], references: [id], onUpdate: NoAction)
+
+  @@index([action])
+  @@index([created_at(sort: Desc)], map: "fee_audit_logs_created_idx")
+  @@index([entity_type, entity_id], map: "fee_audit_logs_entity_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model fee_types {
+  id                BigInt              @id @default(autoincrement())
+  code              String              @unique @db.VarChar(30)
+  name              String              @db.VarChar(100)
+  frequency         String              @db.VarChar(20)
+  description       String?             @db.VarChar(255)
+  is_active         Boolean             @default(true)
+  sort_order        Int                 @default(0)
+  created_at        DateTime?           @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?           @default(now()) @db.Timestamp(0)
+  class_fee_amounts class_fee_amounts[]
+  student_fees      student_fees[]
+}
